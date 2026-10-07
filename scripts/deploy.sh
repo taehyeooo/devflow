@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # 단일 서버(JAR + systemd) 배포를 한 번에: 빌드 → 진행 중 작업 확인 → 전송 → 해시 비교 → 백업 → 교체 → 재시작
 # → UP 대기 → 배포 후 확인 → 기록. 트루바에서 손으로 20번 넘게 반복하던 순서를 그대로 옮겼다.
-#   사용: deploy.sh [--dry-run] [--skip-build]
+#   사용: deploy.sh [--dry-run] [--skip-build] [--checks-only]
+#   --checks-only: 배포 없이 배포 후 확인만 다시 돌리고 기록한다
 # 설정: ~/.config/devflow/<레포>.json 의 "deploy" (examples/config.example.json 참고)
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/config.sh"
-DRY=0; SKIP_BUILD=0
-for a in "$@"; do case "$a" in --dry-run) DRY=1 ;; --skip-build) SKIP_BUILD=1 ;; esac; done
+DRY=0; SKIP_BUILD=0; CHECKS_ONLY=0
+for a in "$@"; do case "$a" in --dry-run) DRY=1 ;; --skip-build) SKIP_BUILD=1 ;; --checks-only) CHECKS_ONLY=1 ;; esac; done
 
 conf=$(devflow_config)
 [ -f "$conf" ] && jq -e '.deploy' "$conf" >/dev/null || { echo "배포 설정이 없습니다: $conf 의 \"deploy\"" >&2; exit 1; }
@@ -30,6 +31,29 @@ if [ "$DRY" = 1 ]; then
   echo "(dry-run) 빌드: ${BUILD:-없음} / 산출물: $ARTIFACT / 백업: $BACKUP / 헬스: $HEALTH"
   echo "(dry-run) 사전 확인: ${PRE:-없음} / 확인 항목: $(jq -r '[.deploy.checks[]?.name] | join(", ")' "$conf")"
   exit 0
+fi
+
+# 배포 후 확인: 확인 명령이 반복문의 입력을 먹지 않게 </dev/null, "0건"이면 grep이 1로 끝나도 멈추지 않게 || true
+# (첫 실제 배포에서 세션 쿠키 확인(grep -c → 0, 종료 코드 1)에서 스크립트가 멈춰 기록이 안 남았다)
+run_checks() {
+  results=(); failed=0
+  while IFS=$'\t' read -r name command expect; do
+    [ -z "$name" ] && continue
+    got=$(bash -c "$command" </dev/null 2>/dev/null | tr -d '[:space:]' || true)
+    if [ "$got" = "$expect" ]; then echo " ✓ $name ($got)"; results+=("$name=ok"); else echo " ✗ $name (기대 $expect, 실제 $got)"; results+=("$name=FAIL($got)"); failed=1; fi
+  done < <(jq -r '.deploy.checks[]? | [.name, .cmd, .expect] | @tsv' "$conf")
+}
+write_log() {  # $1 종류(deploy|checks) $2 UP까지 초 $3 전체 초
+  mkdir -p "$(dirname "$LOG")"
+  jq -nc --arg at "$(date '+%F %T')" --arg kind "$1" --arg commit "$COMMIT" --arg subject "$SUBJECT" --arg hash "${LOCAL_HASH:-}" \
+    --arg backup "${BACKUP:-}" --arg up "$2" --arg total "$3" --arg checks "${results[*]:-}" \
+    '{at:$at, kind:$kind, commit:$commit, subject:$subject, hash:$hash, backup:$backup, upSeconds:$up, totalSeconds:$total, checks:$checks}' >> "$LOG"
+  echo "$(date '+%F %T')	$1	$COMMIT	up=${2}s total=${3}s checks=${results[*]:-}" >> "$HOME/.config/devflow/usage.log"
+}
+
+if [ "$CHECKS_ONLY" = 1 ]; then
+  if [ -f "$ARTIFACT" ]; then LOCAL_HASH=$(shasum -a 256 "$ARTIFACT" | cut -c1-16); fi
+  BACKUP=""; step "배포 후 확인만 다시"; run_checks; write_log checks "" ""; exit $failed
 fi
 
 if [ "$SKIP_BUILD" = 0 ] && [ -n "$BUILD" ]; then step "빌드: $BUILD"; bash -c "$BUILD"; fi
@@ -63,18 +87,8 @@ done
 up=$(( $(date +%s) - restart )); echo "UP: 재시작 후 ${up}초"
 
 step "배포 후 확인"
-results=(); failed=0
-while IFS=$'\t' read -r name command expect; do
-  [ -z "$name" ] && continue
-  got=$(bash -c "$command" 2>/dev/null | tr -d '[:space:]')
-  if [ "$got" = "$expect" ]; then echo " ✓ $name ($got)"; results+=("$name=ok"); else echo " ✗ $name (기대 $expect, 실제 $got)"; results+=("$name=FAIL($got)"); failed=1; fi
-done < <(jq -r '.deploy.checks[]? | [.name, .cmd, .expect] | @tsv' "$conf")
-
+run_checks
 total=$(( $(date +%s) - start ))
-mkdir -p "$(dirname "$LOG")"
-jq -nc --arg at "$(date '+%F %T')" --arg commit "$COMMIT" --arg subject "$SUBJECT" --arg hash "$LOCAL_HASH" \
-  --arg backup "$BACKUP" --argjson up "$up" --argjson total "$total" --arg checks "${results[*]:-}" \
-  '{at:$at, commit:$commit, subject:$subject, hash:$hash, backup:$backup, upSeconds:$up, totalSeconds:$total, checks:$checks}' >> "$LOG"
-echo "$(date '+%F %T')	deploy	$COMMIT	up=${up}s total=${total}s" >> "$HOME/.config/devflow/usage.log"
+write_log deploy "$up" "$total"
 step "끝: 전체 ${total}초 (기록: $LOG)"
 exit $failed
