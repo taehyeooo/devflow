@@ -59,7 +59,7 @@ stop)
   xcrun simctl ui "$UDID" content_size large
   xcrun simctl terminate "$UDID" "$APP_ID" 2>/dev/null || true
   lsof -ti tcp:"$PORT" | xargs kill 2>/dev/null || true
-  left=$( [ -n "$PATCH_FILE" ] && grep -c "$PATCH_MARK" "$PATCH_FILE" || echo 0 )
+  left=$( [ -n "$PATCH_FILE" ] && grep -c "$PATCH_MARK" "$PATCH_FILE" || true ); left=${left:-0}
   log stop "patch-left=$left"; echo "QA 원복 완료 — 남은 패치 ${left}건"
   ;;
 tap)
