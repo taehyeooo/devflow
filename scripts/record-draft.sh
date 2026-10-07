@@ -16,7 +16,7 @@ if ls build/test-results/test/*.xml >/dev/null 2>&1; then
   f=$(grep -l '<failure' build/test-results/test/*.xml 2>/dev/null | wc -l | tr -d ' ')
   tests="전체 ${n}개, 실패 ${f}개 (로컬, $(date -r build/test-results/test '+%F %H:%M') 빌드)"
 fi
-DLOG=$(expand "$(cfg .deploy.log "$HOME/.config/devflow/deploys.log")"); QLOG=$(expand "$(cfg .qa.log "$HOME/.config/devflow/qa.log")")
+DLOG=$(expand "$(cfg .deploy.log "$HOME/.config/devflow/deploys.log")"); QLOG=$(expand "$(cfg .qa.log "$HOME/.config/qaflow/qa.log")")
 lastdeploy=$( [ -f "$DLOG" ] && jq -s 'map(select(.kind == "deploy")) | last // empty' "$DLOG" | jq -r '"\(.at) \(.commit) — 전체 \(.totalSeconds)초, UP \(.upSeconds)초, 확인 \(.checks)"' 2>/dev/null || echo "없음")
 lastqa=$( [ -f "$QLOG" ] && tail -1 "$QLOG" | jq -r '"\(.at) — \(.seconds)초, 탭 \(.taps)번, 남은 패치 \(.patchLeft)"' 2>/dev/null || echo "없음")
 cat <<MD

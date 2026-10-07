@@ -82,7 +82,12 @@ echo "해시 일치: $LOCAL_HASH"
 lap transfer
 
 step "백업 → 교체 → 재시작 (백업: $BACKUP)"
-"${SSH[@]}" "set -e; sudo cp -p $REMOTE $BACKUP; sudo install -o $OWNER -g $OWNER -m 644 $TMP $REMOTE; rm -f $TMP; sudo systemctl restart $SERVICE"
+# 서버에서 하는 일은 설정으로 바꿀 수 있다(기본: 단일 파일 + systemd). {tmp} {remote} {backup} {owner} {service} 를 채워 넣는다.
+fill() { local t=$1; t=${t//\{tmp\}/$TMP}; t=${t//\{remote\}/$REMOTE}; t=${t//\{backup\}/$BACKUP}; t=${t//\{owner\}/$OWNER}; t=${t//\{service\}/$SERVICE}; echo "$t"; }
+SWAP=$(fill "$(d swapCmd 'sudo cp -p {remote} {backup}; sudo install -o {owner} -g {owner} -m 644 {tmp} {remote}; rm -f {tmp}')")
+RESTART=$(fill "$(d restartCmd 'sudo systemctl restart {service}')")
+ROLLBACK=$(fill "$(d rollbackCmd 'sudo cp -p {backup} {remote} && sudo systemctl restart {service}')")
+"${SSH[@]}" "set -e; $SWAP; $RESTART"
 restart=$(date +%s)
 lap swap
 
@@ -90,7 +95,7 @@ step "UP 대기 (최대 ${TIMEOUT}초): $HEALTH"
 until curl -s -m 5 "$HEALTH" | grep -q '"UP"'; do
   sleep 5
   if [ $(( $(date +%s) - restart )) -gt "$TIMEOUT" ]; then
-    echo "UP이 되지 않았습니다. 되돌리기: ssh $HOST 'sudo cp -p $BACKUP $REMOTE && sudo systemctl restart $SERVICE'" >&2
+    echo "UP이 되지 않았습니다. 되돌리기: ssh $HOST '$ROLLBACK'" >&2
     exit 1
   fi
 done

@@ -6,7 +6,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/config.sh"
 export DEVFLOW_CONFIG="$(devflow_config)"
 DLOG=$(expand "$(cfg .deploy.log "$HOME/.config/devflow/deploys.log")")
-QLOG=$(expand "$(cfg .qa.log "$HOME/.config/devflow/qa.log")")
+QLOG=$(expand "$(cfg .qa.log "$HOME/.config/qaflow/qa.log")")
 python3 - "$DLOG" "$QLOG" <<'PY'
 import json, sys, statistics as st, os
 def load(p):

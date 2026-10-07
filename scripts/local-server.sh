@@ -31,7 +31,8 @@ restart)
   stop_server
   if [ -z "$JAR" ]; then [ -n "$BUILD" ] && { echo "빌드: $BUILD"; bash -c "$BUILD"; }; JAR=$ARTIFACT; fi
   t1=$(date +%s)
-  (set -a; source "$ENVF"; set +a; nohup java -jar "$JAR" > "$LOGF" 2>&1 &)
+  START=$(l startCmd 'java -jar {jar}'); START=${START//\{jar\}/$JAR}  # 언어·런타임마다 다른 실행 명령은 설정으로
+  (set -a; [ -f "$ENVF" ] && source "$ENVF"; set +a; nohup bash -c "$START" > "$LOGF" 2>&1 &)
   until curl -s -m 3 "$HEALTH" 2>/dev/null | grep -q '"UP"'; do
     sleep 2; [ $(( $(date +%s) - t1 )) -gt "$TIMEOUT" ] && { echo "UP이 되지 않았습니다 — 로그: $WORKDIR/$LOGF" >&2; tail -20 "$LOGF" >&2; exit 1; }
   done
