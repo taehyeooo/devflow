@@ -21,6 +21,9 @@ PRE=$(d preCheck); LOG=$(expand "$(d log "$HOME/.config/devflow/deploys.log")")
 SSH=(ssh -i "$KEY" -o BatchMode=yes "$HOST")
 
 step() { printf '\n[%s] %s\n' "$(date +%T)" "$*"; }
+# 단계별 시간(초) — 어디에 시간이 드는지 기록해 회고·개선에 쓴다
+declare -a TIMES=(); mark=$(date +%s)
+lap() { local now; now=$(date +%s); TIMES+=("$1=$(( now - mark ))"); mark=$now; }
 start=$(date +%s)
 COMMIT=$(git rev-parse --short HEAD); SUBJECT=$(git log -1 --format=%s)
 STAMP=$(date +%Y%m%d-%H%M%S); BACKUP="$REMOTE.bak-$STAMP"
@@ -49,7 +52,7 @@ write_log() {  # $1 종류(deploy|checks) $2 UP까지 초 $3 전체 초
   mkdir -p "$(dirname "$LOG")"
   jq -nc --arg at "$(date '+%F %T')" --arg kind "$1" --arg commit "$COMMIT" --arg subject "$SUBJECT" --arg hash "${LOCAL_HASH:-}" \
     --arg backup "${BACKUP:-}" --arg up "$2" --arg total "$3" --arg checks "${results[*]:-}" \
-    '{at:$at, kind:$kind, commit:$commit, subject:$subject, hash:$hash, backup:$backup, upSeconds:$up, totalSeconds:$total, checks:$checks}' >> "$LOG"
+    --arg steps "${TIMES[*]:-}" '{at:$at, kind:$kind, commit:$commit, subject:$subject, hash:$hash, backup:$backup, upSeconds:$up, totalSeconds:$total, steps:$steps, checks:$checks}' >> "$LOG"
   echo "$(date '+%F %T')	$1	$COMMIT	up=${2}s total=${3}s checks=${results[*]:-}" >> "$HOME/.config/devflow/usage.log"
 }
 
@@ -58,7 +61,9 @@ if [ "$CHECKS_ONLY" = 1 ]; then
   BACKUP=""; step "배포 후 확인만 다시"; run_checks; write_log checks "" ""; exit $failed
 fi
 
+mark=$(date +%s)
 if [ "$SKIP_BUILD" = 0 ] && [ -n "$BUILD" ]; then step "빌드: $BUILD"; bash -c "$BUILD"; fi
+lap build
 [ -f "$ARTIFACT" ] || { echo "산출물이 없습니다: $ARTIFACT" >&2; exit 1; }
 LOCAL_HASH=$(shasum -a 256 "$ARTIFACT" | cut -c1-16)
 
@@ -66,6 +71,7 @@ if [ -n "$PRE" ]; then
   step "사전 확인(진행 중 작업 등): $PRE"
   bash -c "$PRE" || { echo "사전 확인 실패 — 배포를 멈춥니다." >&2; exit 1; }
 fi
+lap precheck
 
 step "전송 ($(du -h "$ARTIFACT" | cut -f1))"
 TMP="/tmp/devflow-$COMMIT.jar"
@@ -73,10 +79,12 @@ scp -q -i "$KEY" -o BatchMode=yes "$ARTIFACT" "$HOST:$TMP"
 REMOTE_HASH=$("${SSH[@]}" "sha256sum $TMP | cut -c1-16")
 [ "$LOCAL_HASH" = "$REMOTE_HASH" ] || { echo "해시 불일치: 로컬 $LOCAL_HASH / 서버 $REMOTE_HASH" >&2; exit 1; }
 echo "해시 일치: $LOCAL_HASH"
+lap transfer
 
 step "백업 → 교체 → 재시작 (백업: $BACKUP)"
 "${SSH[@]}" "set -e; sudo cp -p $REMOTE $BACKUP; sudo install -o $OWNER -g $OWNER -m 644 $TMP $REMOTE; rm -f $TMP; sudo systemctl restart $SERVICE"
 restart=$(date +%s)
+lap swap
 
 step "UP 대기 (최대 ${TIMEOUT}초): $HEALTH"
 until curl -s -m 5 "$HEALTH" | grep -q '"UP"'; do
@@ -87,9 +95,11 @@ until curl -s -m 5 "$HEALTH" | grep -q '"UP"'; do
   fi
 done
 up=$(( $(date +%s) - restart )); echo "UP: 재시작 후 ${up}초"
+lap up
 
 step "배포 후 확인"
 run_checks
+lap checks
 total=$(( $(date +%s) - start ))
 write_log deploy "$up" "$total"
 step "끝: 전체 ${total}초 (기록: $LOG)"

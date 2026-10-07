@@ -5,6 +5,8 @@ description: 기능·수정·QA를 마친 뒤 docs/experience-notes.md에 작업
 
 # 작업 기록 (devflow)
 
+먼저 사실을 모은다: `bash "${CLAUDE_PLUGIN_ROOT}/scripts/record-draft.sh"` — 이슈 번호, 커밋, 바뀐 파일, 테스트 수·실패, 최근 배포·QA 기록(걸린 시간 포함)을 아래 틀로 출력한다. 범위·방법 비교·남은 것은 대화에서 채운다.
+
 포트폴리오·회고에 바로 쓸 수 있게, 결정의 이유와 실측 근거를 같은 틀로 남긴다.
 
 ## 틀 (docs/experience-notes.md 끝에 추가)

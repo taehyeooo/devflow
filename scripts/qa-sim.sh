@@ -50,6 +50,7 @@ PY
   xcrun simctl terminate "$UDID" "$APP_ID" 2>/dev/null || true
   xcrun simctl launch "$UDID" "$APP_ID" >/dev/null
   open -a Simulator; sleep 20
+  date +%s > "$STATE/qa-start"
   log start; echo "QA 준비 완료 (Metro $PORT) — 화면: $(shot start)"
   ;;
 stop)
@@ -60,6 +61,17 @@ stop)
   xcrun simctl terminate "$UDID" "$APP_ID" 2>/dev/null || true
   lsof -ti tcp:"$PORT" | xargs kill 2>/dev/null || true
   left=$( [ -n "$PATCH_FILE" ] && grep -c "$PATCH_MARK" "$PATCH_FILE" || true ); left=${left:-0}
+  # QA 한 번에 걸린 시간과 탭 수를 남긴다(start → stop) — 회고에서 "QA에 얼마나 드는지"의 근거
+  if [ -f "$STATE/qa-start" ]; then
+    began=$(cat "$STATE/qa-start"); secs=$(( $(date +%s) - began ))
+    since=$(date -r "$began" '+%F %T')
+    taps=$(awk -F'\t' -v s="$since" '$1 >= s && $2 == "qa-tap"' "$HOME/.config/devflow/usage.log" | wc -l | tr -d ' ')
+    QALOG=$(expand "$(q log "$HOME/.config/devflow/qa.log")")
+    jq -nc --arg at "$(date '+%F %T')" --argjson secs "$secs" --argjson taps "$taps" --arg left "$left" \
+      '{at:$at, kind:"qa", seconds:$secs, taps:$taps, patchLeft:$left}' >> "$QALOG"
+    rm -f "$STATE/qa-start"; log session "seconds=$secs taps=$taps"
+    echo "QA 한 번: ${secs}초, 탭 ${taps}번"
+  fi
   log stop "patch-left=$left"; echo "QA 원복 완료 — 남은 패치 ${left}건"
   ;;
 tap)
