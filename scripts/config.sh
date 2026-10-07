@@ -18,3 +18,5 @@ cfg() {
   if [ -z "$v" ]; then echo "${2:-}"; else echo "$v"; fi
 }
 expand() { eval echo "$1"; }  # ~ 와 $HOME 펼치기
+# 사용 기록 한 줄(macOS 기본 명령 `log`와 이름이 겹치지 않게 함수로 덮어쓴다)
+log() { mkdir -p "$HOME/.config/devflow"; echo "$(date '+%F %T')	$1	${2:-}" >> "$HOME/.config/devflow/usage.log"; }
