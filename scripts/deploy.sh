@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# 단일 서버(JAR + systemd) 배포를 한 번에: 빌드 → 진행 중 작업 확인 → 전송 → 해시 비교 → 백업 → 교체 → 재시작
+# → UP 대기 → 배포 후 확인 → 기록. 트루바에서 손으로 20번 넘게 반복하던 순서를 그대로 옮겼다.
+#   사용: deploy.sh [--dry-run] [--skip-build]
+# 설정: ~/.config/devflow/<레포>.json 의 "deploy" (examples/config.example.json 참고)
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$DIR/config.sh"
+DRY=0; SKIP_BUILD=0
+for a in "$@"; do case "$a" in --dry-run) DRY=1 ;; --skip-build) SKIP_BUILD=1 ;; esac; done
+
+conf=$(devflow_config)
+[ -f "$conf" ] && jq -e '.deploy' "$conf" >/dev/null || { echo "배포 설정이 없습니다: $conf 의 \"deploy\"" >&2; exit 1; }
+d() { cfg ".deploy.$1" "${2:-}"; }
+HOST=$(d host); KEY=$(expand "$(d sshKey)"); REMOTE=$(d remotePath); OWNER=$(d owner root); SERVICE=$(d service)
+ARTIFACT=$(d artifact); BUILD=$(d build); HEALTH=$(d healthUrl); TIMEOUT=$(d healthTimeoutSec 240)
+PRE=$(d preCheck); LOG=$(expand "$(d log "$HOME/.config/devflow/deploys.log")")
+SSH=(ssh -i "$KEY" -o BatchMode=yes "$HOST")
+
+step() { printf '\n[%s] %s\n' "$(date +%T)" "$*"; }
+start=$(date +%s)
+COMMIT=$(git rev-parse --short HEAD); SUBJECT=$(git log -1 --format=%s)
+STAMP=$(date +%Y%m%d-%H%M%S); BACKUP="$REMOTE.bak-$STAMP"
+
+step "배포 대상: $COMMIT $SUBJECT → $HOST:$REMOTE (서비스 $SERVICE)"
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "추적 중인 파일에 커밋하지 않은 변경이 있습니다 — 커밋된 코드만 배포합니다." >&2; exit 1
+fi
+if [ "$DRY" = 1 ]; then
+  echo "(dry-run) 빌드: ${BUILD:-없음} / 산출물: $ARTIFACT / 백업: $BACKUP / 헬스: $HEALTH"
+  echo "(dry-run) 사전 확인: ${PRE:-없음} / 확인 항목: $(jq -r '[.deploy.checks[]?.name] | join(", ")' "$conf")"
+  exit 0
+fi
+
+if [ "$SKIP_BUILD" = 0 ] && [ -n "$BUILD" ]; then step "빌드: $BUILD"; bash -c "$BUILD"; fi
+[ -f "$ARTIFACT" ] || { echo "산출물이 없습니다: $ARTIFACT" >&2; exit 1; }
+LOCAL_HASH=$(shasum -a 256 "$ARTIFACT" | cut -c1-16)
+
+if [ -n "$PRE" ]; then
+  step "사전 확인(진행 중 작업 등): $PRE"
+  bash -c "$PRE" || { echo "사전 확인 실패 — 배포를 멈춥니다." >&2; exit 1; }
+fi
+
+step "전송 ($(du -h "$ARTIFACT" | cut -f1))"
+TMP="/tmp/devflow-$COMMIT.jar"
+scp -q -i "$KEY" -o BatchMode=yes "$ARTIFACT" "$HOST:$TMP"
+REMOTE_HASH=$("${SSH[@]}" "sha256sum $TMP | cut -c1-16")
+[ "$LOCAL_HASH" = "$REMOTE_HASH" ] || { echo "해시 불일치: 로컬 $LOCAL_HASH / 서버 $REMOTE_HASH" >&2; exit 1; }
+echo "해시 일치: $LOCAL_HASH"
+
+step "백업 → 교체 → 재시작 (백업: $BACKUP)"
+"${SSH[@]}" "set -e; sudo cp -p $REMOTE $BACKUP; sudo install -o $OWNER -g $OWNER -m 644 $TMP $REMOTE; rm -f $TMP; sudo systemctl restart $SERVICE"
+restart=$(date +%s)
+
+step "UP 대기 (최대 ${TIMEOUT}초): $HEALTH"
+until curl -s -m 5 "$HEALTH" | grep -q '"UP"'; do
+  sleep 5
+  if [ $(( $(date +%s) - restart )) -gt "$TIMEOUT" ]; then
+    echo "UP이 되지 않았습니다. 되돌리기: ssh $HOST 'sudo cp -p $BACKUP $REMOTE && sudo systemctl restart $SERVICE'" >&2
+    exit 1
+  fi
+done
+up=$(( $(date +%s) - restart )); echo "UP: 재시작 후 ${up}초"
+
+step "배포 후 확인"
+results=(); failed=0
+while IFS=$'\t' read -r name command expect; do
+  [ -z "$name" ] && continue
+  got=$(bash -c "$command" 2>/dev/null | tr -d '[:space:]')
+  if [ "$got" = "$expect" ]; then echo " ✓ $name ($got)"; results+=("$name=ok"); else echo " ✗ $name (기대 $expect, 실제 $got)"; results+=("$name=FAIL($got)"); failed=1; fi
+done < <(jq -r '.deploy.checks[]? | [.name, .cmd, .expect] | @tsv' "$conf")
+
+total=$(( $(date +%s) - start ))
+mkdir -p "$(dirname "$LOG")"
+jq -nc --arg at "$(date '+%F %T')" --arg commit "$COMMIT" --arg subject "$SUBJECT" --arg hash "$LOCAL_HASH" \
+  --arg backup "$BACKUP" --argjson up "$up" --argjson total "$total" --arg checks "${results[*]:-}" \
+  '{at:$at, commit:$commit, subject:$subject, hash:$hash, backup:$backup, upSeconds:$up, totalSeconds:$total, checks:$checks}' >> "$LOG"
+echo "$(date '+%F %T')	deploy	$COMMIT	up=${up}s total=${total}s" >> "$HOME/.config/devflow/usage.log"
+step "끝: 전체 ${total}초 (기록: $LOG)"
+exit $failed
