@@ -11,6 +11,8 @@ DRY=0; SKIP_BUILD=0; CHECKS_ONLY=0
 for a in "$@"; do case "$a" in --dry-run) DRY=1 ;; --skip-build) SKIP_BUILD=1 ;; --checks-only) CHECKS_ONLY=1 ;; esac; done
 
 conf=$(devflow_config)
+# 처음 찾은 설정을 고정한다 — 앱 폴더로 cd한 뒤에 다시 찾으면 다른 레포의 설정을 보게 된다(첫 실사용에서 발견).
+export DEVFLOW_CONFIG="$conf"
 [ -f "$conf" ] && jq -e '.deploy' "$conf" >/dev/null || { echo "배포 설정이 없습니다: $conf 의 \"deploy\"" >&2; exit 1; }
 d() { cfg ".deploy.$1" "${2:-}"; }
 HOST=$(d host); KEY=$(expand "$(d sshKey)"); REMOTE=$(d remotePath); OWNER=$(d owner root); SERVICE=$(d service)

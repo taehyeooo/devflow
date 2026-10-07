@@ -12,6 +12,8 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/config.sh"
 conf=$(devflow_config)
+# 처음 찾은 설정을 고정한다 — 앱 폴더로 cd한 뒤에 다시 찾으면 다른 레포의 설정을 보게 된다(첫 실사용에서 발견).
+export DEVFLOW_CONFIG="$conf"
 [ -f "$conf" ] && jq -e '.qa' "$conf" >/dev/null || { echo "QA 설정이 없습니다: $conf 의 \"qa\"" >&2; exit 1; }
 q() { cfg ".qa.$1" "${2:-}"; }
 APP=$(expand "$(q appDir)"); UDID=$(q simUdid); APP_ID=$(q appId); PORT=$(q metroPort 8082)
