@@ -7,6 +7,7 @@ source "$DIR/config.sh"
 export DEVFLOW_CONFIG="$(devflow_config)"
 DLOG=$(expand "$(cfg .deploy.log "$HOME/.config/devflow/deploys.log")")
 QLOG=$(expand "$(cfg .qa.log "$HOME/.config/qaflow/qa.log")")
+export REPORT_JSON=$(mktemp)
 python3 - "$DLOG" "$QLOG" <<'PY'
 import json, sys, statistics as st, os
 def load(p):
@@ -27,4 +28,11 @@ fails = [r for r in d if "FAIL" in (r.get("checks") or "")]
 print("확인 실패한 배포:", len(fails))
 q = load(sys.argv[2])
 print("QA 한 번:", stats([r["seconds"] for r in q]), "· 탭 합계", sum(r["taps"] for r in q))
+rep = {"plugin": "devflow", "kind": "summary", "title": "배포·QA 기록 요약", "env": "기록 파일 기준",
+       "summary": f"배포 {len(d)}회 · QA {len(q)}회", "status": "warn" if fails else "ok",
+       "sections": [{"heading": "배포 전체 시간(초)", "bars": {"unit": "초", "items": [[f"{r['at'][5:16]} {r['commit']}", int(r["totalSeconds"])] for r in d]}},
+                    {"heading": "단계별 평균", "kv": [[k, f"{st.mean(v):.0f}초"] for k, v in steps.items()]},
+                    {"heading": "QA 한 번", "table": {"columns": ["시각", "걸린 시간", "탭", "남은 패치"], "rows": [[r["at"], f"{r['seconds']}초", r["taps"], r["patchLeft"]] for r in q]}}]}
+json.dump(rep, open(os.environ["REPORT_JSON"], "w"), ensure_ascii=False)
 PY
+echo "리포트: $(python3 "$DIR/report_html.py" "$REPORT_JSON")"; rm -f "$REPORT_JSON"

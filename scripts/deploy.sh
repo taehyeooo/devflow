@@ -107,5 +107,13 @@ run_checks
 lap checks
 total=$(( $(date +%s) - start ))
 write_log deploy "$up" "$total"
-step "끝: 전체 ${total}초 (기록: $LOG)"
+rp=$(jq -n --arg commit "$COMMIT" --arg subject "$SUBJECT" --arg hash "$LOCAL_HASH" --arg backup "$BACKUP" --arg host "$HOST" \
+  --arg up "$up" --arg total "$total" --arg steps "${TIMES[*]:-}" --arg checks "${results[*]:-}" --argjson failed "$failed" '
+  {plugin:"devflow", kind:"deploy", title:"운영 배포 \($commit)", summary:"\($subject) — 전체 \($total)초, 재시작 후 \($up)초에 UP",
+   env:"운영 서버 \($host)", status:(if $failed==1 then "fail" else "ok" end),
+   sections:[
+    {heading:"요약", kv:[["커밋",$commit],["해시(앞 16자)",$hash],["백업",$backup],["UP까지","\($up)초"],["전체","\($total)초"]]},
+    {heading:"단계별 시간", bars:{unit:"초", items:[$steps|split(" ")[]|select(.!="")|split("=")|[.[0],(.[1]|tonumber)]]}},
+    {heading:"배포 후 확인", table:{columns:["항목","결과"], rows:[$checks|split(" ")[]|select(.!="")|split("=")|[.[0],.[1]]]}}]}' | report)
+step "끝: 전체 ${total}초 (기록: $LOG, 리포트: $rp)"
 exit $failed

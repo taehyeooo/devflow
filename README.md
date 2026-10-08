@@ -20,6 +20,10 @@
 - 커밋 검사: 메시지 형식 정규식·금지 문자열을 설정
 - QA는 [qaflow](https://github.com/taehyeooo/qaflow), 디자인 QA는 [uiflow](https://github.com/taehyeooo/uiflow)로 나뉘어 있습니다(0.3.0에서 qa-sim을 qaflow로 옮김)
 
+## 리포트
+작업이 끝나면 HTML 리포트를 남깁니다: `~/.config/flow-reports/<플러그인>/<시각>-<종류>.html`.
+다섯 flow 플러그인(startflow·devflow·qaflow·uiflow·benchflow)의 리포트가 한 목록 `~/.config/flow-reports/index.html`에 모입니다(최신이 위, 정상/확인 필요/실패 표시).
+
 ## 설치
 ```
 /plugin marketplace add taehyeooo/devflow

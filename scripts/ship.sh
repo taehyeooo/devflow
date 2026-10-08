@@ -38,7 +38,10 @@ $tests
 }
 Closes #$issue$(s prFooter)"
   url=$(gh pr create --base "$BASE" --head "$branch" --title "$title" --body "$body")
-  log ship-pr "#$issue $url build=$(( $(date +%s) - t0 ))s"; echo "PR: $url" ;;
+  log ship-pr "#$issue $url build=$(( $(date +%s) - t0 ))s"; echo "PR: $url"
+  echo "리포트: $(jq -n --arg i "$issue" --arg b "$branch" --arg u "$url" --arg t "${tests:-빌드 결과 없음}" --arg s "$(( $(date +%s) - t0 ))" --arg c "$(git log --format='%h %s' "origin/$BASE"..HEAD)" '
+    {plugin:"devflow", kind:"ship-pr", title:"PR 만듦 #\($i)", summary:"\($u)", env:"로컬 빌드·테스트", status:"ok",
+     sections:[{heading:"요약", kv:[["이슈","#\($i)"],["브랜치",$b],["PR",$u],["테스트",$t],["빌드·푸시·PR까지","\($s)초"]]},{heading:"커밋", text:$c}]}' | report)" ;;
 merge)
   pr=${2:-$(gh pr view --json number -q .number)}
   info=$(gh pr view "$pr" --json title,headRefName,body); title=$(jq -r .title <<< "$info"); head=$(jq -r .headRefName <<< "$info")
@@ -57,6 +60,9 @@ merge)
     else git -C "$MAIN_ROOT" worktree remove --force "$wt"; echo "작업 폴더 정리: $wt"; fi
   fi
   after=$(s afterMerge); [ -n "$after" ] && { echo "후속: $after"; bash -c "$after"; }
-  log ship-merge "#$pr $title"; echo "머지 완료: $title (#$pr)" ;;
+  log ship-merge "#$pr $title"; echo "머지 완료: $title (#$pr)"
+  echo "리포트: $(jq -n --arg pr "$pr" --arg t "$title" --arg wt "${wt:-없음}" --arg after "${after:-없음}" --arg head "$(git -C "$MAIN_ROOT" log --oneline -1 "origin/$BASE")" '
+    {plugin:"devflow", kind:"ship-merge", title:"머지 #\($pr)", summary:$t, env:"GitHub + 로컬", status:"ok",
+     sections:[{heading:"요약", kv:[["PR","#\($pr)"],["기본 브랜치 최신",$head],["작업 폴더",$wt],["후속 명령",$after]]}]}' | report)" ;;
 *) sed -n '2,7p' "$0"; exit 1 ;;
 esac

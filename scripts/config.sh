@@ -20,3 +20,5 @@ cfg() {
 expand() { eval echo "$1"; }  # ~ 와 $HOME 펼치기
 # 사용 기록 한 줄(macOS 기본 명령 `log`와 이름이 겹치지 않게 함수로 덮어쓴다)
 log() { mkdir -p "$HOME/.config/devflow"; echo "$(date '+%F %T')	$1	${2:-}" >> "$HOME/.config/devflow/usage.log"; }
+# HTML 리포트: JSON을 받아 ~/.config/flow-reports/에 만들고 경로를 출력(목록 페이지 index.html도 갱신)
+report() { local f; f=$(mktemp); cat > "$f"; python3 "$(dirname "${BASH_SOURCE[0]}")/report_html.py" "$f"; rm -f "$f"; }
