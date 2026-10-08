@@ -41,11 +41,12 @@ fi
 # 배포 후 확인: 확인 명령이 반복문의 입력을 먹지 않게 </dev/null, "0건"이면 grep이 1로 끝나도 멈추지 않게 || true
 # (첫 실제 배포에서 세션 쿠키 확인(grep -c → 0, 종료 코드 1)에서 스크립트가 멈춰 기록이 안 남았다)
 run_checks() {
-  results=(); failed=0
+  results=(); failed=0; CHECK_ROWS="[]"
   while IFS=$'\t' read -r name command expect; do
     [ -z "$name" ] && continue
     got=$(bash -c "$command" </dev/null 2>/dev/null | tr -d '[:space:]' || true)
-    if [ "$got" = "$expect" ]; then echo " ✓ $name ($got)"; results+=("$name=ok"); else echo " ✗ $name (기대 $expect, 실제 $got)"; results+=("$name=FAIL($got)"); failed=1; fi
+    if [ "$got" = "$expect" ]; then echo " ✓ $name ($got)"; results+=("$name=ok"); r="정상($got)"; else echo " ✗ $name (기대 $expect, 실제 $got)"; results+=("$name=FAIL($got)"); failed=1; r="실패(기대 $expect, 실제 $got)"; fi
+    CHECK_ROWS=$(jq -c --arg n "$name" --arg r "$r" '. + [[$n,$r]]' <<< "$CHECK_ROWS")
   done < <(jq -r '.deploy.checks[]? | [.name, .cmd, .expect] | @tsv' "$conf")
 }
 write_log() {  # $1 종류(deploy|checks) $2 UP까지 초 $3 전체 초
@@ -108,12 +109,12 @@ lap checks
 total=$(( $(date +%s) - start ))
 write_log deploy "$up" "$total"
 rp=$(jq -n --arg commit "$COMMIT" --arg subject "$SUBJECT" --arg hash "$LOCAL_HASH" --arg backup "$BACKUP" --arg host "$HOST" \
-  --arg up "$up" --arg total "$total" --arg steps "${TIMES[*]:-}" --arg checks "${results[*]:-}" --argjson failed "$failed" '
+  --arg up "$up" --arg total "$total" --arg steps "${TIMES[*]:-}" --argjson rows "$CHECK_ROWS" --argjson failed "$failed" '
   {plugin:"devflow", kind:"deploy", title:"운영 배포 \($commit)", summary:"\($subject) — 전체 \($total)초, 재시작 후 \($up)초에 UP",
    env:"운영 서버 \($host)", status:(if $failed==1 then "fail" else "ok" end),
    sections:[
     {heading:"요약", kv:[["커밋",$commit],["해시(앞 16자)",$hash],["백업",$backup],["UP까지","\($up)초"],["전체","\($total)초"]]},
     {heading:"단계별 시간", bars:{unit:"초", items:[$steps|split(" ")[]|select(.!="")|split("=")|[.[0],(.[1]|tonumber)]]}},
-    {heading:"배포 후 확인", table:{columns:["항목","결과"], rows:[$checks|split(" ")[]|select(.!="")|split("=")|[.[0],.[1]]]}}]}' | report)
+    {heading:"배포 후 확인", table:{columns:["항목","결과"], rows:$rows}}]}' | report)
 step "끝: 전체 ${total}초 (기록: $LOG, 리포트: $rp)"
 exit $failed
